@@ -95,7 +95,6 @@ jobs:
         run: |
           git tag -a "$VERSION" -m "Release $VERSION"
           git push origin "$VERSION"
-          git push origin main
 
       # --- NEW: ensure lowercase image path for GHCR
       - name: Derive lowercase repo for GHCR
