@@ -83,13 +83,15 @@ jobs:
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
-      - name: Update VERSION file
+      - name: Ensure we tag a remote commit (not a new local one)
         run: |
-          echo "$VERSION" > web/VERSION
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add web/VERSION
-          git commit -m "Bump version to $VERSION" || echo "No changes to commit"
+          git fetch --prune --tags origin
+          git checkout -B main origin/main
+
+      - name: Create and push tag
+        run: |
+          git tag -a "$VERSION" -m "Release $VERSION" origin/main
+          git push origin "refs/tags/$VERSION"
 
       - name: Create and push tag
         run: |
