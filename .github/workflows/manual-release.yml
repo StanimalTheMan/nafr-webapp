@@ -46,31 +46,18 @@ jobs:
         id: release-notes
         run: |
           if [[ -f "web/RELEASE_NOTES.md" ]]; then
-            # Extract content between the version header and the next version or end
             VERSION_HEADER="# Release Notes"
             NEXT_VERSION_PATTERN="^## v[0-9]"
-            
-            # Find the line number of the current version
             VERSION_LINE=$(grep -n "## $VERSION" web/RELEASE_NOTES.md | cut -d: -f1)
-            
             if [[ -n "$VERSION_LINE" ]]; then
-              # Extract from the version header to the next version or end of file
               NEXT_VERSION_LINE=$(tail -n +$((VERSION_LINE + 1)) web/RELEASE_NOTES.md | grep -n "$NEXT_VERSION_PATTERN" | head -1 | cut -d: -f1)
-              
               if [[ -n "$NEXT_VERSION_LINE" ]]; then
-                # Extract content between current version and next version
                 tail -n +$VERSION_LINE web/RELEASE_NOTES.md | head -n $((NEXT_VERSION_LINE - 1)) > release_notes.md
               else
-                # Extract from current version to end of file
                 tail -n +$VERSION_LINE web/RELEASE_NOTES.md > release_notes.md
               fi
-              
-              # Remove the version header line
               sed -i '1d' release_notes.md
-              
-              # Clean up any trailing empty lines
               sed -i -e :a -e '/^\s*$/d;N;ba' release_notes.md
-              
               echo "Release notes extracted successfully"
             else
               echo "Warning: Version $VERSION not found in RELEASE_NOTES.md, using full file"
@@ -90,7 +77,6 @@ jobs:
           EOF
           fi
 
-          # Set the release notes content
           {
             echo "RELEASE_NOTES<<EOF"
             cat release_notes.md
@@ -111,28 +97,37 @@ jobs:
           git push origin "$VERSION"
           git push origin main
 
-      - name: Create GitHub Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # --- NEW: ensure lowercase image path for GHCR
+      - name: Derive lowercase repo for GHCR
+        run: echo "REPO_LC=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
+      # --- NEW: login to GHCR
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          tag_name: ${{ env.VERSION }}
-          release_name: Release ${{ env.VERSION }}
-          body: ${{ steps.release-notes.outputs.RELEASE_NOTES }}
-          draft: false
-          prerelease: ${{ github.event.inputs.prerelease }}
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- NEW: force a docker-container Buildx builder
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
+          builder: ${{ steps.buildx.outputs.name }}
           context: ./web
           file: ./web/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ env.VERSION }}
-            ghcr.io/${{ github.repository }}:latest
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
+            ghcr.io/${{ env.REPO_LC }}:${{ env.VERSION }}
+            ghcr.io/${{ env.REPO_LC }}:latest
+          cache-from: type=registry,ref=ghcr.io/${{ env.REPO_LC }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ env.REPO_LC }}:buildcache,mode=max
 
       - name: Summary
         run: |
@@ -140,5 +135,5 @@ jobs:
           echo "- **Version**: ${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Tag**: ${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Prerelease**: ${{ github.event.inputs.prerelease }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Docker Image**: ghcr.io/${{ github.repository }}:${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker Image**: ghcr.io/${{ env.REPO_LC }}:${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Release Notes**: Extracted from web/RELEASE_NOTES.md" >> $GITHUB_STEP_SUMMARY
