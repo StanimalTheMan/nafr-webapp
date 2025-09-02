@@ -1,0 +1,11 @@
+{
+  "ref": "refs/tags/v0.1",
+  "release": {
+    "tag_name": "v0.1",
+    "draft": false,
+    "prerelease": false
+  },
+  "repository": {
+    "full_name": "local/nafr-webapp"
+  }
+}

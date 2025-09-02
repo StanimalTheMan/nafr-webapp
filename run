@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run the GitHub release workflow locally using nektos/act in Docker.
+# Requirements: docker installed; GITHUB_TOKEN env var with packages:write (if you want to test pushing to GHCR)
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "docker is required" >&2
+  exit 1
+fi
+
+VERSION_FILE="web/VERSION"
+if [[ ! -f "$VERSION_FILE" ]]; then
+  echo "Missing $VERSION_FILE" >&2
+  exit 1
+fi
+
+TAG="$(tr -d '\n' < "$VERSION_FILE")"
+REGISTRY="${REGISTRY:-localhost:5000}"
+IMAGE_NAME="${IMAGE_NAME:-${GITHUB_REPOSITORY:-local/nafr-webapp}}"
+EVENT_FILE=".github/act-release.json"
+mkdir -p .github
+
+cat > "$EVENT_FILE" <<EOF
+{
+  "ref": "refs/tags/$TAG",
+  "release": {
+    "tag_name": "$TAG",
+    "draft": false,
+    "prerelease": false
+  },
+  "repository": {
+    "full_name": "${GITHUB_REPOSITORY:-local/nafr-webapp}"
+  }
+}
+EOF
+
+echo "Using release tag: $TAG"
+
+# Pull act image to ensure availability
+docker pull nektos/act:latest >/dev/null 2>&1 || true
+
+# Runner image mapping for ubuntu-latest
+RUNNER_IMAGE="catthehacker/ubuntu:act-latest"
+docker pull "$RUNNER_IMAGE" >/dev/null 2>&1 || true
+
+# Optional: cache dir for actions to avoid root-owned files in $HOME
+ACT_HOME="${ACT_HOME:-$SCRIPT_DIR/.acthome}"
+mkdir -p "$ACT_HOME"
+
+DOCKER_RUN=(
+  docker run --rm -it
+  -v "$SCRIPT_DIR":/github/workspace
+  -v /var/run/docker.sock:/var/run/docker.sock
+  -v "$ACT_HOME":/root/.cache
+  -w /github/workspace
+  -e GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+  -e ACT=1
+  -e REGISTRY="$REGISTRY"
+  -e IMAGE_NAME="$IMAGE_NAME"
+  nektos/act:latest
+  release -e .github/act-release.json
+  -P ubuntu-latest=$RUNNER_IMAGE
+)
+
+echo "Ensuring local registry at $REGISTRY ..."
+if [[ "$REGISTRY" =~ ^localhost:([0-9]+)$ ]]; then
+  PORT="${BASH_REMATCH[1]}"
+  if ! docker ps --format '{{.Names}}' | grep -q '^local-registry$'; then
+    docker run -d --restart=always -p "$PORT:5000" --name local-registry registry:2 >/dev/null || true
+  fi
+fi
+
+"${DOCKER_RUN[@]}"
+
+echo "Building image locally as a fallback..."
+docker build -t "$REGISTRY/$IMAGE_NAME:$TAG" -t "$REGISTRY/$IMAGE_NAME:latest" "$SCRIPT_DIR/web"
+
+echo "Pushing image(s) to $REGISTRY ..."
+docker push "$REGISTRY/$IMAGE_NAME:$TAG" || true
+docker push "$REGISTRY/$IMAGE_NAME:latest" || true
+
+
