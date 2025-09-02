@@ -1,0 +1,144 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., v0.1, v0.2)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as prerelease"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?(-[a-zA-Z0-9-]+)?$ ]]; then
+            echo "Error: Version must be in format v1.0, v1.0.0, or v1.0-beta"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Check if tag already exists
+        run: |
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Error: Tag $VERSION already exists"
+            exit 1
+          fi
+
+      - name: Read release notes
+        id: release-notes
+        run: |
+          if [[ -f "web/RELEASE_NOTES.md" ]]; then
+            # Extract content between the version header and the next version or end
+            VERSION_HEADER="# Release Notes"
+            NEXT_VERSION_PATTERN="^## v[0-9]"
+            
+            # Find the line number of the current version
+            VERSION_LINE=$(grep -n "## $VERSION" web/RELEASE_NOTES.md | cut -d: -f1)
+            
+            if [[ -n "$VERSION_LINE" ]]; then
+              # Extract from the version header to the next version or end of file
+              NEXT_VERSION_LINE=$(tail -n +$((VERSION_LINE + 1)) web/RELEASE_NOTES.md | grep -n "$NEXT_VERSION_PATTERN" | head -1 | cut -d: -f1)
+              
+              if [[ -n "$NEXT_VERSION_LINE" ]]; then
+                # Extract content between current version and next version
+                tail -n +$VERSION_LINE web/RELEASE_NOTES.md | head -n $((NEXT_VERSION_LINE - 1)) > release_notes.md
+              else
+                # Extract from current version to end of file
+                tail -n +$VERSION_LINE web/RELEASE_NOTES.md > release_notes.md
+              fi
+              
+              # Remove the version header line
+              sed -i '1d' release_notes.md
+              
+              # Clean up any trailing empty lines
+              sed -i -e :a -e '/^\s*$/d;N;ba' release_notes.md
+              
+              echo "Release notes extracted successfully"
+            else
+              echo "Warning: Version $VERSION not found in RELEASE_NOTES.md, using full file"
+              cp web/RELEASE_NOTES.md release_notes.md
+            fi
+          else
+            echo "Warning: web/RELEASE_NOTES.md not found, creating default release notes"
+            cat > release_notes.md << EOF
+          # Release $VERSION
+
+          This is a manual release of version $VERSION.
+
+          ## Changes
+          - Manual release created via GitHub Actions
+          - Version: $VERSION
+          - Release Date: $(date -u +"%Y-%m-%d")
+          EOF
+          fi
+
+          # Set the release notes content
+          {
+            echo "RELEASE_NOTES<<EOF"
+            cat release_notes.md
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Update VERSION file
+        run: |
+          echo "$VERSION" > web/VERSION
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add web/VERSION
+          git commit -m "Bump version to $VERSION" || echo "No changes to commit"
+
+      - name: Create and push tag
+        run: |
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
+          git push origin main
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.VERSION }}
+          release_name: Release ${{ env.VERSION }}
+          body: ${{ steps.release-notes.outputs.RELEASE_NOTES }}
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./web
+          file: ./web/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ env.VERSION }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
+
+      - name: Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: ${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Prerelease**: ${{ github.event.inputs.prerelease }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker Image**: ghcr.io/${{ github.repository }}:${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Notes**: Extracted from web/RELEASE_NOTES.md" >> $GITHUB_STEP_SUMMARY
