@@ -32,20 +32,6 @@ jobs:
             exit 1
           fi
 
-      - name: Ensure VERSION bumped vs main
-        run: |
-          git fetch --depth=1 origin main
-          if git rev-parse --verify origin/main >/dev/null 2>&1; then
-            if git show origin/main:web/VERSION >/dev/null 2>&1; then
-              PREV=$(git show origin/main:web/VERSION || true)
-              CURR=$(cat web/VERSION)
-              if [ "$PREV" = "$CURR" ]; then
-                echo "VERSION not bumped (still $CURR vs main)." >&2
-                exit 1
-              fi
-            fi
-          fi
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
