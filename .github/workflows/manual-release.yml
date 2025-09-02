@@ -93,10 +93,16 @@ jobs:
           git tag -a "$VERSION" -m "Release $VERSION" origin/main
           git push origin "refs/tags/$VERSION"
 
-      - name: Create and push tag
-        run: |
-          git tag -a "$VERSION" -m "Release $VERSION"
-          git push origin "$VERSION"
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.VERSION }}
+          release_name: Release ${{ env.VERSION }}
+          body: ${{ steps.release-notes.outputs.RELEASE_NOTES }}
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease }}
 
       # --- NEW: ensure lowercase image path for GHCR
       - name: Derive lowercase repo for GHCR
