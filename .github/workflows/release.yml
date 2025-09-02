@@ -23,6 +23,9 @@ jobs:
         id: version
         run: echo "version=$(cat web/VERSION)" >> $GITHUB_OUTPUT
 
+      - name: Set lowercase repository name
+        run: echo "REPO_LC=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
       - name: Ensure tag matches VERSION
         run: |
           TAG="${GITHUB_REF##*/}"
@@ -49,7 +52,7 @@ jobs:
           file: ./web/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+            ${{ env.REGISTRY }}/${{ env.REPO_LC }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.REPO_LC }}:latest
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.REPO_LC }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.REPO_LC }}:buildcache,mode=max
