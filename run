@@ -41,7 +41,7 @@ EOF
 echo "Using release tag: $TAG"
 
 # Pull act image to ensure availability
-docker pull nektos/act:latest >/dev/null 2>&1 || true
+docker pull nektos/act:latest >/dev/null 2>&1 || echo "Warning: Could not pull nektos/act:latest, will try to use locally available image"
 
 # Runner image mapping for ubuntu-latest
 RUNNER_IMAGE="catthehacker/ubuntu:act-latest"
@@ -70,7 +70,12 @@ echo "Ensuring local registry at $REGISTRY ..."
 if [[ "$REGISTRY" =~ ^localhost:([0-9]+)$ ]]; then
   PORT="${BASH_REMATCH[1]}"
   if ! docker ps --format '{{.Names}}' | grep -q '^local-registry$'; then
-    docker run -d --restart=always -p "$PORT:5000" --name local-registry registry:2 >/dev/null || true
+    # Check if port is already in use
+    if lsof -i :$PORT >/dev/null 2>&1; then
+      echo "Port $PORT is already in use. Using existing registry or skipping..."
+    else
+      docker run -d --restart=always -p "$PORT:5000" --name local-registry registry:2 >/dev/null || true
+    fi
   fi
 fi
 
